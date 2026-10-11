@@ -240,7 +240,13 @@ type AppContextValue = Persisted & {
   openScan: () => void;
   closeScan: () => void;
   finishScan: () => number;
-
+    addBackendDuplicates: (
+    duplicates: {
+      master_record_number: number;
+      record_number: number;
+      matched_by: string[];
+    }[]
+  ) => number;
   addRecord: (r: NewRecord) => void;
   updateRecord: (id: string, patch: Partial<NewRecord>) => void;
   deleteRecords: (ids: string[]) => void;
@@ -404,6 +410,109 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             "scan",
           ),
         }));
+        return found.length;
+      },
+     
+      addBackendDuplicates: (duplicates) => {
+        const s = stateRef.current;
+
+        const skip = new Set<string>([
+          ...s.dismissed,
+          ...s.pairs.map((p) => pairKey(p.master.id, p.duplicate.id)),
+        ]);
+
+        let nextId =
+          s.pairs.reduce((max, p) => Math.max(max, num(p.id)), 4471) + 1;
+
+        const found: Pair[] = [];
+
+        for (const item of duplicates) {
+          const masterRecord = s.records[item.master_record_number - 1];
+          const duplicateRecord = s.records[item.record_number - 1];
+
+          
+if (!masterRecord || !duplicateRecord) {
+  console.log("Skipped: record mapping failed", {
+    masterRecordNumber: item.master_record_number,
+    duplicateRecordNumber: item.record_number,
+    masterRecord,
+    duplicateRecord,
+  });
+  continue;
+}
+
+if (masterRecord.id === duplicateRecord.id) {
+  console.log("Skipped: same record ID", masterRecord.id);
+  continue;
+}
+
+
+          const key = pairKey(masterRecord.id, duplicateRecord.id);
+
+          
+if (skip.has(key)) {
+  console.log("Skipped: duplicate pair already exists or was dismissed", {
+    key,
+    masterId: masterRecord.id,
+    duplicateId: duplicateRecord.id,
+    existingPairs: s.pairs.map((p) => ({
+      masterId: p.master.id,
+      duplicateId: p.duplicate.id,
+    })),
+    dismissed: [...s.dismissed],
+  });
+  continue;
+}
+
+
+          const matchedEmail = item.matched_by.includes("email");
+          const matchedPhone = item.matched_by.includes("phone");
+
+          const reason =
+            matchedEmail && matchedPhone
+              ? "Matching email + phone"
+              : matchedEmail
+                ? "Matching email address"
+                : matchedPhone
+                  ? "Matching phone number"
+                  : "Backend-detected match";
+
+          found.push({
+            id: `DUP-${nextId++}`,
+            confidence:
+              matchedEmail && matchedPhone
+                ? 97
+                : matchedEmail
+                  ? 92
+                  : matchedPhone
+                    ? 88
+                    : 85,
+            reason,
+            master: stripStatus(masterRecord),
+            duplicate: stripStatus(duplicateRecord),
+          });
+
+          skip.add(key);
+        }
+
+        if (found.length > 0) {
+          patch((cur) => ({
+            pairs: [...found, ...cur.pairs],
+            log: logEntry(
+              cur,
+              `backend scan found ${found.length} new duplicate${found.length > 1 ? "s" : ""}`,
+              "DataGuard API",
+              "scan",
+            ),
+            notifications: notif(
+              cur,
+              "Backend scan completed",
+              `${found.length} new duplicate${found.length > 1 ? "s" : ""} added for review.`,
+              "duplicate",
+            ),
+          }));
+        }
+
         return found.length;
       },
 

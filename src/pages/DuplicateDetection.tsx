@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Card, Badge, Button, ConfirmModal } from "../components/ui";
 import {
@@ -19,12 +18,16 @@ type ScanRecord = {
   phone?: string | null;
 };
 
+
 type ScanDuplicate = {
+  master_record_number: number;
   record_number: number;
   name: string;
   email: string;
   phone: string | null;
+  matched_by: string[];
 };
+
 
 type ScanResponse = {
   total_records: number;
@@ -86,14 +89,17 @@ function FieldRow({
 
 export default function DuplicateDetection() {
   const {
-    pairs,
-    resolved,
-    mergePair,
-    deletePairDuplicate,
-    dismissPair,
-    openScan,
-    toast,
-  } = useApp();
+  addBackendDuplicates,
+  records,
+  pairs,
+  resolved,
+  mergePair,
+  deletePairDuplicate,
+  dismissPair,
+  openScan,
+  toast,
+  toasts,
+} = useApp();
 
   const [deleting, setDeleting] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -102,38 +108,32 @@ export default function DuplicateDetection() {
 
   const duplicatePairs = pairs;
 
+
   const runBackendScan = async () => {
     setScanning(true);
     setScanError("");
     setScanResult(null);
 
     try {
-      // Temporary sample records for testing the backend connection.
-      // We will replace these with actual application records next.
-      const records: ScanRecord[] = [
-        {
-          name: "Rahul",
-          email: "rahul@example.com",
-          phone: "9876543210",
-        },
-        {
-          name: "Rahul Kumar",
-          email: "rahul@example.com",
-          phone: "9876543210",
-        },
-        {
-          name: "Aman",
-          email: "aman@example.com",
-          phone: "9123456780",
-        },
-      ];
+      const scanRecords: ScanRecord[] = records.map((record) => ({
+        name: record.name || "",
+        email: record.email || "",
+        phone: record.phone || "",
+      }));
+
+      if (scanRecords.length === 0) {
+        setScanError(
+          "No application records found. Add records first, then run the scan."
+        );
+        return;
+      }
 
       const response = await fetch(`${API_URL}/detect-duplicates`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ records }),
+        body: JSON.stringify({ records: scanRecords }),
       });
 
       if (!response.ok) {
@@ -141,21 +141,52 @@ export default function DuplicateDetection() {
       }
 
       const result: ScanResponse = await response.json();
-      setScanResult(result);
+     
+       console.log("Backend scan result:", result);
+     
+ setScanResult(result);
+
+      console.log("Backend duplicates:", JSON.stringify(result.duplicates, null, 2));
+console.log("Frontend records:", records.map((r, i) => ({
+  position: i + 1,
+  id: r.id,
+  name: r.name,
+  email: r.email,
+  phone: r.phone,
+})));
+
+
+      const addedCount = addBackendDuplicates(result.duplicates);
+
+      console.log("Showing scan notification", {
+  addedCount,
+  duplicatesFound: result.duplicates_found,
+});
+     
+  
+
       toast(
-        `Scan complete: ${result.duplicates_found} duplicate(s) found`,
+        addedCount > 0
+          ? `Scan complete: ${addedCount} new duplicate(s) added for review.`
+          : result.duplicates_found > 0
+            ? `Scan complete: ${result.duplicates_found} duplicate(s) found. All are already in review.`
+            : "Scan complete: No duplicates found.",
         "info"
       );
+      console.log("Toast state after scan:", toasts);      
+
     } catch (error) {
       console.error("DataGuard scan failed:", error);
 
       setScanError(
-        "Backend se connection nahi ho paaya. Check karo ki Python FastAPI server http://127.0.0.1:8000 par chal raha hai."
+        "Backend connection failed. Make sure the Python FastAPI server is running at http://127.0.0.1:8000."
       );
     } finally {
       setScanning(false);
     }
   };
+
+
 
   const summary = [
     {
@@ -293,8 +324,8 @@ export default function DuplicateDetection() {
           )}
 
           <p className="text-xs text-slate-400">
-            This test currently scans sample records. Actual application data
-            will be connected in the next step.
+            This scan analyzes the current application records using the
+            DataGuard API.
           </p>
         </Card>
       )}

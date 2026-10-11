@@ -94,6 +94,7 @@ function RecordFormModal({
 
 export default function AllRecords() {
   const { records, search, setSearch, addRecord, updateRecord, deleteRecords, toast } = useApp();
+  const [importing, setImporting] = useState(false);
   const { query, status } = search;
 
   const [filterOpen, setFilterOpen] = useState(false);
@@ -160,18 +161,155 @@ export default function AllRecords() {
 
   const hasFilters = query.trim() !== "" || status !== "All";
 
+ 
+  const handleImportCsv = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      try {
+        const text = String(reader.result ?? "");
+        const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
+
+        if (lines.length < 2) {
+          toast("CSV file has no records to import.", "error");
+          return;
+        }
+
+        const parseRow = (line: string) => {
+          const cells: string[] = [];
+          let cell = "";
+          let quoted = false;
+
+          for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+
+            if (char === '"') {
+              if (quoted && line[i + 1] === '"') {
+                cell += '"';
+                i++;
+              } else {
+                quoted = !quoted;
+              }
+            } else if (char === "," && !quoted) {
+              cells.push(cell.trim());
+              cell = "";
+            } else {
+              cell += char;
+            }
+          }
+
+          cells.push(cell.trim());
+          return cells;
+        };
+
+        const headers = parseRow(lines[0]).map((h) =>
+          h.trim().toLowerCase().replace(/^\uFEFF/, "")
+        );
+
+        const nameIndex = headers.indexOf("name");
+        const emailIndex = headers.indexOf("email");
+        const phoneIndex = headers.indexOf("phone");
+        const sourceIndex = headers.indexOf("source");
+
+        if (nameIndex === -1 || emailIndex === -1) {
+          toast("CSV must contain name and email columns.", "error");
+          return;
+        }
+
+        let imported = 0;
+        let skipped = 0;
+
+        for (const line of lines.slice(1)) {
+          const cells = parseRow(line);
+          const name = cells[nameIndex] ?? "";
+          const email = cells[emailIndex] ?? "";
+          const phone = phoneIndex === -1 ? "" : cells[phoneIndex] ?? "";
+          const source =
+            sourceIndex === -1 || !cells[sourceIndex]
+              ? "Imports"
+              : cells[sourceIndex];
+
+          if (
+            !name ||
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+            (phone !== "" && phone.replace(/\D/g, "").length < 6)
+          ) {
+            skipped++;
+            continue;
+          }
+
+          addRecord({ name, email, phone, source });
+          imported++;
+        }
+
+        if (imported > 0) {
+          toast(
+            `Imported ${imported} record${imported === 1 ? "" : "s"}${
+              skipped ? `; skipped ${skipped} invalid row(s)` : ""
+            }.`,
+            "success"
+          );
+        } else {
+          toast(
+            `No records imported. ${skipped} invalid row(s) skipped.`,
+            "error"
+          );
+        }
+      } catch {
+        toast("Could not read this CSV file.", "error");
+      } finally {
+        setImporting(false);
+        event.target.value = "";
+      }
+    };
+
+    reader.onerror = () => {
+      toast("Could not read this CSV file.", "error");
+      setImporting(false);
+      event.target.value = "";
+    };
+
+    reader.readAsText(file);
+  };
+
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white">All Records</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Browse and manage every record across your connected sources.
-          </p>
-        </div>
-        <Button onClick={() => setAddOpen(true)}>
-          <Plus className="h-4 w-4" /> Add Record
-        </Button>
+        
+<div>
+  <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white">All Records</h1>
+  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+    Browse and manage every record across your connected sources.
+  </p>
+</div>
+
+<div className="flex flex-wrap items-center gap-2">
+  <input
+    id="csv-import-input"
+    type="file"
+    accept=".csv,text/csv"
+    className="hidden"
+    onChange={handleImportCsv}
+  />
+  <Button
+    variant="secondary"
+    disabled={importing}
+    onClick={() => document.getElementById("csv-import-input")?.click()}
+  >
+    <Download className="h-4 w-4" />
+    {importing ? "Importing..." : "Import CSV"}
+  </Button>
+  <Button onClick={() => setAddOpen(true)}>
+    <Plus className="h-4 w-4" /> Add Record
+  </Button>
+</div>
+
       </div>
 
       <Card className="overflow-hidden">
